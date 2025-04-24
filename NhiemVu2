@@ -183,8 +183,14 @@ void moveToBranch(int targetAngle) {
 
 void returnToCenter() {
   moveBackWard(speed_go, TRANSFER_DISTANCE);
-  TurnLeft(speed_turn, currentAngle);
+  if (currentAngle != 0) {
+     if (currentAngle < 0) {
+       TurnLeft(speed_turn, -currentAngle);  // Nếu đang lệch phải, quay trái về 0
+     } else {
+     TurnRight(speed_turn, currentAngle); // Nếu đang lệch trái, quay phải về 0
+     }
   currentAngle = 0;
+  }
   while (true) {
     followLine(speed_go);
         
@@ -241,24 +247,7 @@ void process(int angle, String ColorBar) {
       moveToBranch(0);
       GripBreak(500);
       returnToCenter();
-     if (angle == 0 && color == "RED") {
-       int targetBranch = -1;
-       if (!branch[3]) targetBranch = 30;
-       else if (!branch[4]) targetBranch = 60;
-
-       if (targetBranch != -1) {
-       Serial.println("Chuyển cọc đỏ từ trung chuyển về nhánh phải.");
-       moveToBranch(targetBranch);
-       GripBreak(500);
-       returnToCenter();
-       branch[(targetBranch + 60) / 30] = true;
-       branch[2] = false; 
-       }
-       else {
-       Serial.println("Không còn nhánh nào trống để đặt cọc đỏ.");
-        }
-      }
-    }
+     }
   }
 }
 void moveRedFromCenter() {
