@@ -154,10 +154,10 @@ int currentAngle = 0;
 void moveToBranch(int targetAngle) {
   int angleDiff = targetAngle - currentAngle;
 
-  if (angleDiff > 0) {
+  if (angleDiff < 0) {
     TurnRight(speed_turn, angleDiff);
   } 
-  else if (angleDiff < 0) {
+  else if (angleDiff > 0) {
     TurnLeft(speed_turn, -angleDiff);
   }
   while (true) {
@@ -213,9 +213,10 @@ void process(int angle, String ColorBar) {
   else {
     Serial.println("Nhấc thanh gỗ lên.");
     Grip(500);
+    branch[(angle + 60) / 30 + 1] = false;
     returnToCenter();
 
-    if (angle == 30 && color == "GREEN") {
+    if ((angle == 30 || angle == 60) && color == "GREEN") {
       int targetBranch = -1;
       if (!branch[1]) targetBranch = -60;
       else if (!branch[2]) targetBranch = -30;
