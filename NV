@@ -1,0 +1,402 @@
+#include <Leanbot.h>
+#include <Arduino_APDS9960.h>
+
+const int time_delay = 200;
+const int threshold = 50;
+const int TRANSFER_DISTANCE = 200;
+const int DISTANCE_THRESHOLD = 20; // Ngưỡng phát hiện vật thể
+const int speed_turn = 600;
+const int speed_go = 800;
+const int time_angle_unit = 500;
+
+int SPEED_MAX = 1000;             // tốc độ tối đa
+int SPEED_4   = 0.8 * SPEED_MAX;  // 80%
+int SPEED_3   = 0.6 * SPEED_MAX;  // 60%
+int SPEED_2   = 0.4 * SPEED_MAX;  // 40%
+int SPEED_1   = 0.2 * SPEED_MAX;  // 20%
+int SPEED_0   = 0.0 * SPEED_MAX;
+
+void runLineFollowingMission() {
+  LbMission.begin();                       // Bắt đầu nhiệm vụ
+
+  do {
+    followLineCarefully();
+  } while (LbIRLine.isBlackDetected());
+
+  LbMission.end();                         // Kết thúc nhiệm vụ
+}
+
+// ------------------------------------------
+// Hàm phụ: Khi mất line, tìm lại một cách cẩn thận
+// ------------------------------------------
+void followLineCarefully() {
+  for (int i = 0; i < 30; i++) {            // đi tối đa 30mm tìm lại line
+    runFollowLine();
+    if (LbIRLine.isBlackDetected()) {
+      break;
+    }
+    LbMotion.waitDistanceMm(1);             // đi 1mm rồi đọc cảm biến lại
+  }
+}
+
+// ------------------------------------------
+// Hàm phụ: Đọc cảm biến line và xử lý robot chạy
+// ------------------------------------------
+void runFollowLine() {
+  byte line = LbIRLine.read(50);            // Đọc cảm biến 4 mắt với ngưỡng 50
+  LbIRLine.displayOnRGB(line, CRGB::Blue);  // Hiển thị trạng thái trên đèn RGB
+  LbIRLine.println(line);                   // In kết quả ra Serial
+
+  switch (line) {
+  case 0b0100:
+    LbMotion.runLR(SPEED_3, SPEED_MAX);    // Rẽ nhẹ trái
+    break;
+
+  case 0b1100:
+    LbMotion.runLR(SPEED_2, SPEED_MAX);    // Rẽ trái nhiều
+    break;
+
+  case 0b1000:
+    LbMotion.runLR(SPEED_0, SPEED_MAX);    // Gần như quay trái
+    break;
+
+  case 0b0010:
+    LbMotion.runLR(SPEED_MAX, SPEED_3);    // Rẽ nhẹ phải
+    break;
+
+  case 0b0011:
+    LbMotion.runLR(SPEED_MAX, SPEED_2);    // Rẽ phải nhiều
+    break;
+
+  case 0b0001:
+    LbMotion.runLR(SPEED_MAX, SPEED_0);    // Gần như quay phải
+    break;
+
+  case 0b0110:
+  case 0b0000:
+    LbMotion.runLR(SPEED_MAX, SPEED_MAX);  // Đi thẳng nhanh
+    break;
+
+  case 0b1111:
+    LbMotion.runLR(SPEED_0, SPEED_0);      // Dừng hẳn (có thể ở ngã tư)
+    break;
+
+  default:
+    LbMotion.runLR(SPEED_MAX, SPEED_MAX);  // Mặc định cứ đi thẳng
+    break;
+ }
+
+}
+
+void TurnLeft(int speed, int angle) {
+    LbMotion.runLR(-speed, +speed);
+    LbMotion.waitRotationDeg(angle);
+    LbMotion.stopAndWait();
+    LbDelay(time_delay);
+}
+
+void TurnRight(int speed, int angle) {
+    LbMotion.runLR(+speed, -speed);
+    LbMotion.waitRotationDeg(angle);
+    LbMotion.stopAndWait();
+    LbDelay(time_delay);
+}
+
+void moveForward(int speed, int distance) {
+    LbMotion.runLR(speed, speed);
+    LbMotion.waitDistanceMm(distance);
+    LbMotion.stopAndWait();
+}
+
+void moveBackWard(int speed, int distance) {
+    LbMotion.runLR(-speed, -speed);
+    LbMotion.waitDistanceMm(distance);
+    LbMotion.stopAndWait();
+}
+
+bool isObjectDetected() {
+    long distance = LbMotion.getDistanceMm();
+    return distance > 0 && distance < DISTANCE_THRESHOLD;
+}
+long getDistance() {
+    return LbMotion.getDistanceMm();
+}
+
+// === HÀM ĐIỀU KHIỂN GẮP VẬT === //
+void Grip(int time_angle) {
+    for (int i = 0; i <= 90; i += 10) {
+        LbGripper.moveToLR(i, i, time_angle);
+        LbDelay(15);
+    }
+    LbMotion.stopAndWait();
+    LbDelay(time_delay);
+}
+
+void GripBreak(int time_angle) {
+    for (int i = 90; i >= 0; i -= 10) {
+        LbGripper.moveToLR(i, i, time_angle);
+        LbDelay(15);
+    }
+    LbMotion.stopAndWait();
+    LbDelay(time_delay);
+}
+
+class cLbColorDetector {
+  private:
+    int objRed, objGreen, objBlue;
+  
+  public:
+    void detect();
+    void printRGB();
+    String getColor();
+};
+
+void cLbColorDetector::detect() {
+  int originalBrightness = LbRGB.getBrightness();
+  LbRGB.setBrightness(255);
+
+  int rr, gg, bb;
+
+  LbRGB.fillColor(0xFF00FF);
+  LbRGB.show();
+  while(APDS.colorAvailable() == 0);
+  APDS.readColor(rr, gg, bb);
+  int r1 = rr;
+  int b1 = bb;
+
+  LbRGB.fillColor(0X00FF00);
+  LbRGB.show();
+  while(APDS.colorAvailable() == 0);
+  APDS.readColor(rr, gg, bb);
+  int g1 = gg;
+
+  LbRGB.fillColor(0x000000);
+  LbRGB.show();
+  while (APDS.colorAvailable() == 0);
+  APDS.readColor(rr, gg, bb);
+
+  objRed   = (r1 - rr) * 2;
+  objGreen = (g1 - gg) * 2;
+  objBlue  = (b1 - bb) * 1;
+
+  LbRGB.setBrightness(originalBrightness);
+}
+
+void cLbColorDetector::printRGB() {
+  Serial.print("RGB: ");
+  Serial.print(objRed);
+  Serial.print(" ");
+  Serial.print(objGreen);
+  Serial.print(" ");
+  Serial.print(objBlue);
+  Serial.println();
+}
+
+String cLbColorDetector::getColor() {
+  if (objRed && objRed > objGreen && objRed > objBlue) {
+    LbRGB.fillColor(CRGB::Red);
+    Serial.println("RED");
+    LbRGB.show();
+    return "RED";
+  } 
+  else if (objGreen && objGreen > objRed && objGreen > objBlue) {
+    LbRGB.fillColor(CRGB::Green);
+    Serial.println("GREEN");
+    LbRGB.show();
+    return "GREEN";
+  }
+  else {
+    LbRGB.fillColor(CRGB::Black);
+    LbRGB.show();
+    return "UNKNOWN";
+  }
+}
+
+
+cLbColorDetector LbColorDetector;
+
+int currentAngle = 0;
+
+void moveToBranch(int targetAngle) {
+  int angleDiff = targetAngle - currentAngle;
+
+  // Quay robot đến góc mục tiêu
+  if (angleDiff < 0) {
+    TurnRight(speed_turn, -angleDiff);
+  } 
+  else if (angleDiff > 0) {
+    TurnLeft(speed_turn, angleDiff);
+  }
+
+  currentAngle = targetAngle;
+
+  long moved = 0;
+LbMotion.runLR(speed_go, speed_go);
+
+  while (moved < TRANSFER_DISTANCE) {
+    runFollowLine();            // chỉ chạy 1 bước line
+
+    moved = LbMotion.getDistanceMm();
+
+    if (isObjectDetected()) {
+      Serial.println("Phát hiện vật thể gần! Dừng lại.");
+      LbMotion.stopAndWait();
+      break;
+    }
+
+    byte line = LbIRLine.read(threshold);
+    if (line == 0b1111) {  
+    Serial.println("Đến cuối vạch, dừng lại!");
+    LbMotion.stopAndWait();
+    break;
+   }
+
+    if (line == 0b1001 || line == 0b0110) {  
+      Serial.println("Phát hiện ngã rẽ!");
+      LbMotion.stopAndWait();
+      break;
+    }
+
+    LbMotion.waitDistanceMm(5); // mỗi lần tiến thêm 5mm rồi check lại
+  }
+}
+
+void returnToCenter() {
+  Serial.println("Trở về trung tâm...");
+  
+  // Quay về đúng hướng 0 trước
+  if (currentAngle != 0) {
+    if (currentAngle < 0) {
+      TurnLeft(speed_turn, -currentAngle);
+    } else {
+      TurnRight(speed_turn, currentAngle);
+    }
+    currentAngle = 0;
+  }
+
+  // Dò line cẩn thận khi quay về trung tâm
+  LbMotion.runLR(-speed_go, -speed_go); // Đi lùi trong khi dò line
+
+  while (true) {
+    byte line = LbIRLine.read(threshold);
+    
+    if (line != 0b0000) { // Phát hiện vạch
+      Serial.println("Đã tìm thấy vạch trung tâm!");
+      LbMotion.stopAndWait();
+      break;
+    }
+  }
+  LbMotion.stopAndWait();
+  Serial.println("Đã về trung tâm.");
+}
+
+bool branch[5] = {false, false, false, false, false };
+
+void process(int angle, String ColorBar) {
+  moveToBranch(angle);
+  // if (!isObjectDetected()) {
+  //   Serial.println("Không có vật thể ở vị trí này.");
+  //   returnToCenter();
+  //   return;
+  // }
+  LbColorDetector.detect();
+  String color = LbColorDetector.getColor();
+
+  if (color == ColorBar) {
+    Serial.println("Thanh gỗ đã đúng vị trí.");
+    branch[(angle + 60) / 30] = true;
+    returnToCenter();
+  } 
+  else {
+    Serial.println("Nhấc thanh gỗ lên.");
+    Grip(500);
+    branch[(angle + 60) / 30] = false;
+    returnToCenter();
+
+    if ((angle == 30 || angle == 60) && color == "GREEN") {
+      int targetBranch = -1;
+      if (!branch[0]) targetBranch = -60;
+      else if (!branch[1]) targetBranch = -30;
+
+      if (targetBranch != -1) {
+        Serial.println("Di chuyển cọc xanh về nhánh trống.");
+        moveToBranch(targetBranch);
+        GripBreak(500);
+        returnToCenter();
+        branch[(targetBranch + 60) / 30] = true;
+      } 
+      else {
+        Serial.println("Không có nhánh trống để đặt cọc.");
+      }
+    } 
+    else {
+      Serial.println("Di chuyển thanh gỗ đến vị trí trung chuyển.");
+      moveToBranch(0);
+      GripBreak(500);
+      returnToCenter();
+     }
+  }
+}
+void moveRedFromCenter() {
+  Serial.println("Kiểm tra gỗ ở trung chuyển...");
+
+  moveToBranch(0); // quay về trung chuyển
+
+  if (!isObjectDetected()) {
+    Serial.println("Không có vật ở trung chuyển.");
+    returnToCenter();
+    return;
+  }
+
+  LbColorDetector.detect();
+  String color = LbColorDetector.getColor();
+
+  if (color == "RED") {
+    Serial.println("Phát hiện gỗ đỏ tại trung chuyển. Tiến hành di chuyển...");
+
+    int targetBranch = -1;
+    if (!branch[3]) targetBranch = 30;
+    else if (!branch[4]) targetBranch = 60;
+
+    if (targetBranch != -1) {
+      Grip(500);
+      returnToCenter();
+      moveToBranch(targetBranch);
+      GripBreak(500);
+      returnToCenter();
+      branch[(targetBranch + 60) / 30] = true;
+      branch[2] = false; // trung chuyển đã trống
+    } else {
+      Serial.println("Không còn nhánh nào để đặt gỗ đỏ.");
+    }
+  } else {
+    Serial.println("Không phải gỗ đỏ, giữ nguyên.");
+    returnToCenter();
+  }
+}
+
+void setup() {
+  Leanbot.begin();
+  Serial.begin(9600);
+  if (APDS.begin()) {
+    Serial.println("Init APDS-9960 ok.");
+  } else {
+    Serial.println("Init APDS-9960 error.");
+    while (1);
+  }
+}
+
+void loop() {
+    Serial.println("Nhấn nút để bắt đầu...");
+    while (LbTouch.read(TB1A) == 0);  // Chờ khi nhấn nút
+    delay(200);
+    // Serial.println("Bắt đầu nhiệm vụ...");
+     process(-60, "GREEN");
+    // // process(-30, "GREEN");
+    // // process(+30, "RED");
+    // // process(+60, "RED");
+    // // moveRedFromCenter();
+
+    // Serial.println("Hoàn thành nhiệm vụ. Nhấn nút để chạy lại.");
+    while (LbTouch.read(TB1A) == 1);  // Chờ nhả nút ra trước khi bắt đầu lại
+}
